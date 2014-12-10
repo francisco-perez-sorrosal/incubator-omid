@@ -287,6 +287,7 @@ public class TTable implements Closeable {
         tsscan.setMaxVersions(1);
         tsscan.setTimeRange(0, transaction.getStartTimestamp() + 1);
         Map<byte[], NavigableSet<byte[]>> kvs = scan.getFamilyMap();
+        LOG.info("TX {} -> KVS {}", transaction.getStartTimestamp(), kvs.entrySet());
         for (Map.Entry<byte[], NavigableSet<byte[]>> entry : kvs.entrySet()) {
             byte[] family = entry.getKey();
             NavigableSet<byte[]> qualifiers = entry.getValue();
@@ -296,6 +297,7 @@ public class TTable implements Closeable {
             for (byte[] qualifier : qualifiers) {
                 tsscan.addColumn(family, CellUtils.addShadowCellSuffix(qualifier));
             }
+            LOG.info("QUALSSSS {}", qualifiers);
         }
         return new TransactionalClientScanner(transaction, tsscan, 1);
     }
@@ -334,6 +336,7 @@ public class TTable implements Closeable {
             boolean snapshotValueFound = false;
             Cell oldestCell = null;
             for (Cell cell : columnCells) {
+                LOG.info("Cell S{} V {}", cell.getTimestamp(), Bytes.toInt(cell.getValue()));
                 if (isCellInSnapshot(cell, transaction, commitCache)) {
                     if (!CellUtil.matchingValue(cell, DELETE_TOMBSTONE)) {
                         keyValuesInSnapshot.add(cell);
@@ -486,6 +489,7 @@ public class TTable implements Closeable {
                 }
                 if (!result.isEmpty()) {
                     filteredResult = filterCellsForSnapshot(result.listCells(), state, maxVersions);
+
                 }
             }
             return Result.create(filteredResult);
