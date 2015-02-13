@@ -49,6 +49,16 @@
 
         <!-- End of Dependencies on Omid modules -->
 
+        <!-- core -->
+
+        <dependency>
+            <groupId>com.lmax</groupId>
+            <artifactId>disruptor</artifactId>
+            <version>${disruptor.version}</version>
+        </dependency>
+
+        <-- end core -->
+
         <!-- storage related -->
 
         <dependency>
@@ -64,13 +74,15 @@
 
         <!-- end storage related -->
 
-        <!--logging-->
+        <!-- logging -->
 
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>${slf4j.version}</version>
         </dependency>
+
+        <!-- end logging -->
 
         <!-- testing -->
 

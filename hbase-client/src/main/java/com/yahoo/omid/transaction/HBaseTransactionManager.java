@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import com.google.common.base.Charsets;
 import com.google.common.base.Optional;
 import com.google.common.collect.Maps;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.yahoo.omid.committable.CommitTable;
 import com.yahoo.omid.committable.CommitTable.CommitTimestamp;
 import com.yahoo.omid.committable.hbase.HBaseCommitTable;
@@ -44,6 +45,12 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
     private static final Logger LOG = LoggerFactory.getLogger(HBaseTransactionManager.class);
 
     public static final byte[] SHADOW_CELL_SUFFIX = "\u0080".getBytes(Charsets.UTF_8); // Non printable char (128 ASCII)
+
+    public static final String SHADOW_CELL_UPDATE_MODE = "hbase.tm.shadowcellupdate.mode";
+
+    enum ShadowCellUpdateMode {
+        SYNC, ASYNC
+    }
 
     private static class HBaseTransactionFactory implements TransactionFactory<HBaseCellId> {
 
@@ -104,7 +111,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
                     throw new OmidInstantiationException("Exception whilst getting the CommitTable client", e);
                 }
             }
-            return new HBaseTransactionManager(tsoClient, ownsTsoClient,
+            return new HBaseTransactionManager(conf, tsoClient, ownsTsoClient,
                     commitTableClient, ownsCommitTableClient,
                     new HBaseTransactionFactory());
         }
@@ -123,12 +130,28 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
         return new Builder();
     }
 
-    private HBaseTransactionManager(TSOClient tsoClient,
+    private ShadowCellsUpdater shadowCellsUpdater;
+    private ShadowCellUpdateMode shadowCellUpdateMode;
+
+    private HBaseTransactionManager(Configuration conf,
+                                    TSOClient tsoClient,
                                     boolean ownsTSOClient,
                                     CommitTable.Client commitTableClient,
                                     boolean ownsCommitTableClient,
                                     HBaseTransactionFactory hBaseTransactionFactory) {
         super(tsoClient, ownsTSOClient, commitTableClient, ownsCommitTableClient, hBaseTransactionFactory);
+
+        shadowCellUpdateMode = conf.getEnum(SHADOW_CELL_UPDATE_MODE, ShadowCellUpdateMode.SYNC);
+        switch (shadowCellUpdateMode) {
+        case ASYNC:
+            shadowCellsUpdater = new HBaseAsyncSyncShadowCellsUpdater();
+            break;
+        case SYNC:
+        default:
+            shadowCellsUpdater = new HBaseSyncShadowCellsUpdater();
+            break;
+        }
+        LOG.info("Shadow Cell update mode {}", shadowCellUpdateMode);
     }
 
     @Override
@@ -137,21 +160,27 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
 
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
-        Set<HBaseCellId> cells = transaction.getWriteSet();
+        switch (shadowCellUpdateMode) {
+        case ASYNC:
+            ListenableFuture<Void> result = shadowCellsUpdater.asyncUpdate(transaction);
 
-        // Add shadow cells
-        for (HBaseCellId cell : cells) {
-            Put put = new Put(cell.getRow());
-            put.add(cell.getFamily(),
-                    CellUtils.addShadowCellSuffix(cell.getQualifier()),
-                    transaction.getStartTimestamp(),
-                    Bytes.toBytes(transaction.getCommitTimestamp()));
             try {
-                cell.getTable().put(put);
-            } catch (IOException e) {
-                throw new TransactionManagerException(
-                        "Failed inserting shadow cell " + cell + " for Tx " + transaction, e);
+                result.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                e.printStackTrace();
+            } catch (ExecutionException e) {
+                if (e.getCause() instanceof TransactionManagerException) {
+                    throw (TransactionManagerException) e.getCause();
+                } else {
+                    throw new TransactionManagerException("Unknown exec error", e.getCause());
+                }
             }
+            break;
+        case SYNC:
+        default:
+            shadowCellsUpdater.update(transaction);
+            break;
         }
         // Flush affected tables before returning to avoid loss of shadow cells updates
         // when autoflush is disabled
