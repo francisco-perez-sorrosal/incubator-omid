@@ -17,6 +17,7 @@ package com.yahoo.omid.metrics;
 
 import com.codahale.metrics.ConsoleReporter;
 import com.codahale.metrics.CsvReporter;
+import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricFilter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.ScheduledReporter;
@@ -45,11 +46,15 @@ public class CodahaleMetricsProvider implements MetricsProvider, MetricsRegistry
     private static final Logger LOG = LoggerFactory.getLogger(CodahaleMetricsProvider.class);
 
     public static final Pattern CODAHALE_METRICS_CONFIG_PATTERN = Pattern
-        .compile(
-            "(csv|slf4j|console|graphite):(.+):(\\d+):(DAYS|HOURS|MICROSECONDS|MILLISECONDS|MINUTES|NANOSECONDS|SECONDS)");
+            .compile("(jmx|csv|slf4j|console|graphite):(.+):(\\d+):(DAYS|HOURS|MICROSECONDS|MILLISECONDS|MINUTES|NANOSECONDS|SECONDS)");
+
+    public static final String DEFAULT_CODAHALE_METRICS_CONFIG = "console:_:60:SECONDS";
 
     private MetricRegistry metrics = new MetricRegistry();
     private List<ScheduledReporter> reporters = new ArrayList<>();
+    // We need to manager JMX as a different reporter not included in the previous list because
+    // it does not extend ScheduledReporter
+    private JmxReporter jmxReporter = null;
 
     private final int metricsOutputFrequency;
     private final TimeUnit timeUnit;
@@ -61,21 +66,25 @@ public class CodahaleMetricsProvider implements MetricsProvider, MetricsRegistry
         int reporterCount = 0;
         for (Reporter reporter : conf.getReporters()) {
             ScheduledReporter codahaleReporter = null;
-            switch (reporter) {
-                case CONSOLE:
-                    codahaleReporter = createAndGetConfiguredConsoleReporter();
-                    break;
-                case GRAPHITE:
-                    codahaleReporter = createAndGetConfiguredGraphiteReporter(conf.getPrefix(),
-                                                                              conf.getGraphiteHostConfig());
-                    break;
-                case CSV:
-                    codahaleReporter = createAndGetConfiguredCSVReporter(conf.getPrefix(),
-                                                                         conf.getCSVDir());
-                    break;
-                case SLF4J:
-                    codahaleReporter = createAndGetConfiguredSlf4jReporter(conf.getSlf4jLogger());
-                    break;
+            switch(reporter) {
+            case CONSOLE:
+                codahaleReporter = createAndGetConfiguredConsoleReporter();
+                break;
+            case GRAPHITE:
+                codahaleReporter = createAndGetConfiguredGraphiteReporter(conf.getPrefix(),
+                                                                          conf.getGraphiteHostConfig());
+                break;
+            case CSV:
+                codahaleReporter = createAndGetConfiguredCSVReporter(conf.getPrefix(),
+                                                                     conf.getCSVDir());
+                break;
+            case SLF4J:
+                codahaleReporter = createAndGetConfiguredSlf4jReporter(conf.getSlf4jLogger());
+                break;
+            case JMX:
+                jmxReporter = createAndGetConfiguredJMXReporter();
+                reporterCount++;
+                break;
             }
             if (codahaleReporter != null) {
                 reporters.add(codahaleReporter);
@@ -94,6 +103,10 @@ public class CodahaleMetricsProvider implements MetricsProvider, MetricsRegistry
                      r.getClass().getCanonicalName(), metricsOutputFrequency, timeUnit);
             r.start(metricsOutputFrequency, timeUnit);
         }
+        if (jmxReporter != null) { // Start JMX reporting separately
+            LOG.info("Starting JMX reporter");
+            jmxReporter.start();
+        }
     }
 
     @Override
@@ -103,6 +116,11 @@ public class CodahaleMetricsProvider implements MetricsProvider, MetricsRegistry
             LOG.info("Stopping reporter {}", r.toString());
             r.stop();
         }
+        if (jmxReporter != null) { // Stop JMX reporting separately
+            LOG.info("Stopping JMX reporter");
+            jmxReporter.stop();
+        }
+
     }
 
     @Override
@@ -183,6 +201,14 @@ public class CodahaleMetricsProvider implements MetricsProvider, MetricsRegistry
             .convertRatesTo(TimeUnit.SECONDS)
             .convertDurationsTo(TimeUnit.MILLISECONDS)
             .build();
+    }
+
+    private JmxReporter createAndGetConfiguredJMXReporter() {
+        LOG.info("Configuring stats with JMX");
+        return JmxReporter.forRegistry(metrics)
+                .convertRatesTo(TimeUnit.SECONDS)
+                .convertDurationsTo(TimeUnit.MILLISECONDS)
+                .build();
     }
 
     /**

@@ -56,6 +56,9 @@ public class CodahaleModule extends AbstractModule {
                 codahaleConfig.setOutputFreqTimeUnit(TimeUnit.valueOf(matcher.group(4)));
 
                 switch(reporter) {
+                case "jmx":
+                     codahaleConfig.addReporter(Reporter.JMX);
+                     break;
                 case "csv":
                     codahaleConfig.addReporter(Reporter.CSV);
                     codahaleConfig.setCSVDir(reporterConfig);

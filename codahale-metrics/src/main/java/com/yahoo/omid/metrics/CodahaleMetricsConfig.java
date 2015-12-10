@@ -15,19 +15,18 @@
  */
 package com.yahoo.omid.metrics;
 
-import java.util.HashSet;
-import java.util.Set;
+import com.google.inject.Inject;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
-
-import com.google.inject.Inject;
+import java.util.HashSet;
+import java.util.Set;
 
 @Singleton
 public class CodahaleMetricsConfig extends AbstractMetricsConfig {
 
     public enum Reporter {
-        CSV, SLF4J, GRAPHITE, CONSOLE
+        JMX, CSV, SLF4J, GRAPHITE, CONSOLE
     }
 
     private static final String DEFAULT_PREFIX = "omid";
