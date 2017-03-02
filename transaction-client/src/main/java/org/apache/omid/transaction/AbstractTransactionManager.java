@@ -43,6 +43,7 @@ import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.N
 import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.SHADOW_CELL;
 import static org.apache.omid.metrics.MetricsUtils.name;
 
+// TODO Restructure transaction exception management around begin/commmit/rollback
 /**
  * Omid's base abstract implementation of the {@link TransactionManager} interface.
  *
@@ -196,7 +197,12 @@ public abstract class AbstractTransactionManager implements TransactionManager {
             commitTimer.start();
             try {
                 if (tx.getWriteSet().isEmpty()) {
-                    markReadOnlyTransaction(tx); // No need for read-only transactions to contact the TSO Server
+                    try {
+                        commitReadOnlyTransaction(tx);
+                    } catch(RollbackException e) {
+                        rollback(tx);
+                        throw e;
+                    }
                 } else {
                     commitRegularTransaction(tx);
                 }
@@ -397,6 +403,22 @@ public abstract class AbstractTransactionManager implements TransactionManager {
 
     }
 
+    private void commitReadOnlyTransaction(AbstractTransaction<? extends CellId> tx) throws RollbackException {
+
+        long currentLWM = 0;
+        try {
+            currentLWM = getLowWatermark();
+        } catch (TransactionException e) {
+            throw new RollbackException("Can't get LWM to commit RO tx " + tx);
+        }
+        if (tx.getStartTimestamp() >= currentLWM) {
+            markReadOnlyTransaction(tx); // No need for read-only transactions to contact the TSO Server
+        } else {
+            throw new RollbackException("RO tx " + tx + " rolledback (too old.) Current LWM " + currentLWM);
+        }
+
+    }
+
     private void commitRegularTransaction(AbstractTransaction<? extends CellId> tx)
             throws RollbackException, TransactionException
     {
@@ -491,6 +513,17 @@ public abstract class AbstractTransactionManager implements TransactionManager {
         txToSetup.setStatus(Status.COMMITTED);
         txToSetup.setCommitTimestamp(commitTS);
 
+    }
+
+    public long getLowWatermark() throws TransactionException {
+        try {
+            return commitTableClient.readLowWatermark().get();
+        } catch (ExecutionException ee) {
+            throw new TransactionException("Error reading low watermark", ee.getCause());
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new TransactionException("Interrupted reading low watermark", ie);
+        }
     }
 
 }

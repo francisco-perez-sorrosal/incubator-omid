@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 
 public class HBaseTransactionManager extends AbstractTransactionManager implements HBaseTransactionClient {
@@ -226,16 +225,10 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
         }
     }
 
+    // TODO Remove this from here
     @Override
     public long getLowWatermark() throws TransactionException {
-        try {
-            return commitTableClient.readLowWatermark().get();
-        } catch (ExecutionException ee) {
-            throw new TransactionException("Error reading low watermark", ee.getCause());
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            throw new TransactionException("Interrupted reading low watermark", ie);
-        }
+        return super.getLowWatermark();
     }
 
     // ----------------------------------------------------------------------------------------------------------------
